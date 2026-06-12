@@ -1,0 +1,36 @@
+{
+  "name": "mosaic-module-ideas-lab",
+  "version": "1.0.0",
+  "description": "Mosaic module — PARA-method ideas workspace with AI enrichment",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build":         "tsc",
+    "test":          "vitest run",
+    "test:watch":    "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "better-sqlite3":     "^9.6.0",
+    "express":            "^4.21.1"
+  },
+  "dependencies": {
+    "multer": "^2.0.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk":      "^0.104.1",
+    "@opentelemetry/api":     "^1.9.1",
+    "@types/better-sqlite3":  "^7.6.12",
+    "@types/express":         "^4.17.21",
+    "@types/multer":          "^1.4.12",
+    "@types/node":            "^22.0.0",
+    "@types/supertest":       "^6.0.2",
+    "@vitest/coverage-v8":    "^4.1.8",
+    "better-sqlite3":         "^9.6.0",
+    "supertest":              "^7.0.0",
+    "tsx":                    "^4.19.2",
+    "typescript":             "^5.7.2",
+    "vitest":                 "^4.1.8"
+  }
+}

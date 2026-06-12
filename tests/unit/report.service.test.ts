@@ -1,0 +1,161 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import Database                              from 'better-sqlite3'
+import type { ModuleDb }                     from '@mosaic/sdk'
+import { migrate }                           from '../../src/migrate.js'
+import * as rpt                              from '../../src/services/report.service.js'
+import { createIdea, updateIdea }            from '../../src/services/ideas.service.js'
+
+function makeDb(): Database.Database {
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
+  db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE)')
+  const moduleDb: ModuleDb = {
+    prepare:     db.prepare.bind(db),
+    exec:        (sql: string) => { db.exec(sql) },
+    transaction: (fn) => db.transaction(fn),
+    raw:         db,
+  }
+  migrate(moduleDb)
+  db.prepare('INSERT INTO users (username) VALUES (?)').run('charlie')
+  return db
+}
+
+// Helper to set due_date on an idea bypassing service layer (to avoid COALESCE caveats)
+function setDueDate(db: Database.Database, id: number, date: string) {
+  db.prepare('UPDATE ideas_lab_ideas SET due_date = ? WHERE id = ?').run(date, id)
+}
+
+let db: Database.Database
+let userId: number
+
+beforeEach(() => {
+  db = makeDb()
+  userId = (db.prepare('SELECT id FROM users WHERE username = ?').get('charlie') as any).id
+})
+
+// ─── getOverdueIdeas ──────────────────────────────────────────────────────────
+
+describe('getOverdueIdeas', () => {
+  it('returns empty when no overdue ideas', () => {
+    createIdea(db, userId, { title: 'Future' })
+    expect(rpt.getOverdueIdeas(db, userId)).toHaveLength(0)
+  })
+
+  it('returns overdue ideas', () => {
+    const idea = createIdea(db, userId, { title: 'Past Due' }) as any
+    setDueDate(db, idea.id, '2020-01-01')
+    const items = rpt.getOverdueIdeas(db, userId)
+    expect(items).toHaveLength(1)
+    expect(items[0].title).toBe('Past Due')
+    expect(items[0].url).toBe(`/ideas/${idea.id}`)
+  })
+
+  it('excludes done and archived ideas', () => {
+    const done = createIdea(db, userId, { title: 'Done', status: 'done' }) as any
+    setDueDate(db, done.id, '2020-01-01')
+    const archived = createIdea(db, userId, { title: 'Archived', status: 'archived' }) as any
+    setDueDate(db, archived.id, '2020-01-01')
+    expect(rpt.getOverdueIdeas(db, userId)).toHaveLength(0)
+  })
+})
+
+// ─── getWeeklyIdeas ───────────────────────────────────────────────────────────
+
+describe('getWeeklyIdeas', () => {
+  it('returns ideas with due dates in range', () => {
+    const idea = createIdea(db, userId, { title: 'In Range' }) as any
+    setDueDate(db, idea.id, '2026-06-11')
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.map(i => i.title)).toContain('In Range')
+  })
+
+  it('excludes ideas outside range with old updated_at', () => {
+    const idea = createIdea(db, userId, { title: 'Outside' }) as any
+    setDueDate(db, idea.id, '2025-01-01')
+    // Reset updated_at so the "recently active" clause doesn't include it
+    db.prepare("UPDATE ideas_lab_ideas SET updated_at = '2025-01-01' WHERE id = ?").run(idea.id)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.map(i => i.title)).not.toContain('Outside')
+  })
+})
+
+// ─── getMonthlyIdeas ──────────────────────────────────────────────────────────
+
+describe('getMonthlyIdeas', () => {
+  it('returns ideas due in the month', () => {
+    const idea = createIdea(db, userId, { title: 'June Task' }) as any
+    setDueDate(db, idea.id, '2026-06-15')
+    const items = rpt.getMonthlyIdeas(db, userId, 2026, 6)
+    expect(items.map(i => i.title)).toContain('June Task')
+  })
+
+  it('excludes ideas outside the month', () => {
+    const idea = createIdea(db, userId, { title: 'July Task' }) as any
+    setDueDate(db, idea.id, '2026-07-01')
+    const items = rpt.getMonthlyIdeas(db, userId, 2026, 6)
+    expect(items.map(i => i.title)).not.toContain('July Task')
+  })
+})
+
+// ─── getIdeaSummary ───────────────────────────────────────────────────────────
+
+describe('getIdeaSummary', () => {
+  it('counts ideas by status', () => {
+    createIdea(db, userId, { title: 'A', status: 'new' })
+    createIdea(db, userId, { title: 'B', status: 'new' })
+    createIdea(db, userId, { title: 'C', status: 'in_progress' })
+    const summary = rpt.getIdeaSummary(db, userId)
+    expect(summary['new']).toBe(2)
+    expect(summary['in progress']).toBe(1)
+  })
+
+  it('includes Overdue count when applicable', () => {
+    const idea = createIdea(db, userId, { title: 'Old' }) as any
+    setDueDate(db, idea.id, '2020-01-01')
+    const summary = rpt.getIdeaSummary(db, userId)
+    expect(summary['Overdue']).toBeGreaterThan(0)
+  })
+
+  it('returns empty object for user with no ideas', () => {
+    expect(rpt.getIdeaSummary(db, userId)).toEqual({})
+  })
+})
+
+// ─── getDueSoonIdeas ──────────────────────────────────────────────────────────
+
+describe('getDueSoonIdeas', () => {
+  it('returns ideas due within 2 days of given date', () => {
+    const idea = createIdea(db, userId, { title: 'Due Tomorrow' }) as any
+    setDueDate(db, idea.id, '2026-06-12')
+    const items = rpt.getDueSoonIdeas(db, userId, '2026-06-11')
+    expect(items.map(i => i.title)).toContain('Due Tomorrow')
+  })
+
+  it('excludes done ideas', () => {
+    const idea = createIdea(db, userId, { title: 'Done Already', status: 'done' }) as any
+    setDueDate(db, idea.id, '2026-06-12')
+    expect(rpt.getDueSoonIdeas(db, userId, '2026-06-11')).toHaveLength(0)
+  })
+})
+
+// ─── getOverdueNotifications ──────────────────────────────────────────────────
+
+describe('getOverdueNotifications', () => {
+  it('returns notification items for overdue ideas', () => {
+    const idea = createIdea(db, userId, { title: 'Late', priority: 'high' }) as any
+    setDueDate(db, idea.id, '2020-01-01')
+    const items = rpt.getOverdueNotifications(db, userId, '2026-06-11')
+    expect(items).toHaveLength(1)
+    expect(items[0].body).toContain('Overdue since')
+    expect(items[0].priority).toBe('high')
+  })
+
+  it('caps at 10 items', () => {
+    for (let i = 0; i < 15; i++) {
+      const idea = createIdea(db, userId, { title: `Late ${i}` }) as any
+      setDueDate(db, idea.id, '2020-01-01')
+    }
+    const items = rpt.getOverdueNotifications(db, userId, '2026-06-11')
+    expect(items).toHaveLength(10)
+  })
+})
