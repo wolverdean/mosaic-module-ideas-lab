@@ -1,5 +1,5 @@
 import type { Database }          from 'better-sqlite3'
-import type { ReportItem, ReportSummary, NotificationItem } from '@mosaic/sdk'
+import type { ReportItem, ReportSummary, NotificationItem, CalendarItem } from '@mosaic/sdk'
 
 function pad(n: number) { return String(n).padStart(2, '0') }
 function todayStr() {
@@ -118,6 +118,51 @@ export function getDueSoonIdeas(
     priority: r.priority,
     url:      `/ideas/${r.id}`,
   }))
+}
+
+export function getCalendarItems(
+  db: Database, userId: number, year: number, month: number
+): CalendarItem[] {
+  const start = `${year}-${pad(month)}-01`
+  const end   = `${year}-${pad(month)}-31`
+
+  const ideas = db.prepare(`
+    SELECT id, title, due_date, priority
+    FROM ideas_lab_ideas
+    WHERE user_id = ?
+      AND due_date >= ? AND due_date <= ?
+      AND status NOT IN ('done','archived')
+    ORDER BY due_date
+  `).all(userId, start, end) as any[]
+
+  const tasks = db.prepare(`
+    SELECT s.id, s.title, s.due_date, s.idea_id, i.title AS idea_title
+    FROM ideas_lab_sub_items s
+    JOIN ideas_lab_ideas i ON i.id = s.idea_id
+    WHERE i.user_id = ?
+      AND s.done = 0
+      AND s.due_date >= ? AND s.due_date <= ?
+    ORDER BY s.due_date
+  `).all(userId, start, end) as any[]
+
+  return [
+    ...ideas.map(r => ({
+      id:   `idea:${r.id}`,
+      title: r.title,
+      date:  r.due_date,
+      type:  'idea' as const,
+      url:   `/ideas/${r.id}`,
+      meta:  { priority: r.priority },
+    })),
+    ...tasks.map(r => ({
+      id:   `task:${r.id}`,
+      title: r.title,
+      date:  r.due_date,
+      type:  'task' as const,
+      url:   `/ideas/${r.idea_id}`,
+      meta:  { idea_title: r.idea_title },
+    })),
+  ]
 }
 
 export function getOverdueNotifications(
