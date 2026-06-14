@@ -159,3 +159,198 @@ describe('getOverdueNotifications', () => {
     expect(items).toHaveLength(10)
   })
 })
+
+// ─── getCalendarItems ─────────────────────────────────────────────────────────
+
+describe('getCalendarItems', () => {
+  it('returns empty array when nothing is due in the month', () => {
+    expect(rpt.getCalendarItems(db, userId, 2026, 6)).toHaveLength(0)
+  })
+
+  it('returns ideas with due_date in the month as type "idea"', () => {
+    const idea = createIdea(db, userId, { title: 'June plan' }) as any
+    setDueDate(db, idea.id, '2026-06-15')
+    const items = rpt.getCalendarItems(db, userId, 2026, 6)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id:   `idea:${idea.id}`,
+      type: 'idea',
+      date: '2026-06-15',
+      url:  `/ideas/${idea.id}`,
+    })
+  })
+
+  it('excludes done ideas', () => {
+    const idea = createIdea(db, userId, { title: 'Done idea', status: 'done' }) as any
+    setDueDate(db, idea.id, '2026-06-15')
+    expect(rpt.getCalendarItems(db, userId, 2026, 6)).toHaveLength(0)
+  })
+
+  it('excludes archived ideas', () => {
+    const idea = createIdea(db, userId, { title: 'Archived idea', status: 'archived' }) as any
+    setDueDate(db, idea.id, '2026-06-15')
+    expect(rpt.getCalendarItems(db, userId, 2026, 6)).toHaveLength(0)
+  })
+
+  it('excludes ideas due in a different month', () => {
+    const idea = createIdea(db, userId, { title: 'July idea' }) as any
+    setDueDate(db, idea.id, '2026-07-01')
+    expect(rpt.getCalendarItems(db, userId, 2026, 6)).toHaveLength(0)
+  })
+
+  it('includes meta.priority on idea items', () => {
+    const idea = createIdea(db, userId, { title: 'High priority', priority: 'high' }) as any
+    setDueDate(db, idea.id, '2026-06-20')
+    const items = rpt.getCalendarItems(db, userId, 2026, 6)
+    expect(items[0].meta?.priority).toBe('high')
+  })
+
+  it('returns incomplete sub-items with due_date in month as type "task"', () => {
+    const idea = createIdea(db, userId, { title: 'Parent idea' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, position) VALUES (?, 'Sub task', '2026-06-10', 1)"
+    ).run(idea.id)
+    const items = rpt.getCalendarItems(db, userId, 2026, 6)
+    const task = items.find((i: any) => i.type === 'task')
+    expect(task).toBeDefined()
+    expect(task?.id).toMatch(/^task:/)
+    expect(task?.url).toBe(`/ideas/${idea.id}`)
+    expect((task?.meta as any)?.idea_title).toBe('Parent idea')
+  })
+
+  it('excludes done sub-items', () => {
+    const idea = createIdea(db, userId, { title: 'Parent' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Done task', '2026-06-10', 1, 1)"
+    ).run(idea.id)
+    const items = rpt.getCalendarItems(db, userId, 2026, 6)
+    expect(items.filter((i: any) => i.type === 'task')).toHaveLength(0)
+  })
+
+  it('returns both ideas and sub-items', () => {
+    const idea = createIdea(db, userId, { title: 'Idea' }) as any
+    setDueDate(db, idea.id, '2026-06-20')
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, position) VALUES (?, 'Task early', '2026-06-05', 1)"
+    ).run(idea.id)
+    const items = rpt.getCalendarItems(db, userId, 2026, 6)
+    expect(items.filter((i: any) => i.type === 'idea')).toHaveLength(1)
+    expect(items.filter((i: any) => i.type === 'task')).toHaveLength(1)
+  })
+})
+
+// ─── Sub-items in getOverdueIdeas ─────────────────────────────────────────────
+
+describe('getOverdueIdeas — sub-items', () => {
+  it('includes overdue incomplete sub-items', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Overdue task', '2020-01-01', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getOverdueIdeas(db, userId)
+    expect(items.some(i => i.title === 'Overdue task')).toBe(true)
+  })
+
+  it('excludes done sub-items from overdue', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Done task', '2020-01-01', 1, 1)"
+    ).run(idea.id)
+    const items = rpt.getOverdueIdeas(db, userId)
+    expect(items.some(i => i.title === 'Done task')).toBe(false)
+  })
+
+  it('does not include sub-items without a due date', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, done, position) VALUES (?, 'No date task', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getOverdueIdeas(db, userId)
+    expect(items.some(i => i.title === 'No date task')).toBe(false)
+  })
+
+  it('overdue sub-item has type "task" and url pointing to parent idea', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Fix thing', '2020-01-01', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getOverdueIdeas(db, userId)
+    const task = items.find(i => i.title === 'Fix thing')
+    expect(task).toBeDefined()
+    expect(task!.url).toBe(`/ideas/${idea.id}`)
+  })
+})
+
+// ─── Sub-items in getWeeklyIdeas ──────────────────────────────────────────────
+
+describe('getWeeklyIdeas — sub-items', () => {
+  it('includes incomplete sub-items with due date in range', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'In-range task', '2026-06-11', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.some(i => i.title === 'In-range task')).toBe(true)
+  })
+
+  it('excludes done sub-items from weekly', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Done task', '2026-06-11', 1, 1)"
+    ).run(idea.id)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.some(i => i.title === 'Done task')).toBe(false)
+  })
+
+  it('excludes sub-items outside the date range', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Future task', '2027-01-01', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.some(i => i.title === 'Future task')).toBe(false)
+  })
+
+  it('sub-item url points to parent idea', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_sub_items (idea_id, title, due_date, done, position) VALUES (?, 'Check thing', '2026-06-11', 0, 1)"
+    ).run(idea.id)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    const task = items.find(i => i.title === 'Check thing')
+    expect(task!.url).toBe(`/ideas/${idea.id}`)
+  })
+})
+
+// ─── Completed actions in getWeeklyIdeas ─────────────────────────────────────
+
+describe('getWeeklyIdeas — completed actions', () => {
+  it('includes completed next_action_log entries within date range', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_next_action_log (idea_id, user_id, action, completed_at) VALUES (?, ?, 'Reviewed docs', '2026-06-11 10:00:00')"
+    ).run(idea.id, userId)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.some(i => i.title === 'Reviewed docs')).toBe(true)
+  })
+
+  it('excludes completed actions outside date range', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_next_action_log (idea_id, user_id, action, completed_at) VALUES (?, ?, 'Old action', '2025-01-01 10:00:00')"
+    ).run(idea.id, userId)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    expect(items.some(i => i.title === 'Old action')).toBe(false)
+  })
+
+  it('completed action has type "action" and url pointing to parent idea', () => {
+    const idea = createIdea(db, userId, { title: 'Project' }) as any
+    db.prepare(
+      "INSERT INTO ideas_lab_next_action_log (idea_id, user_id, action, completed_at) VALUES (?, ?, 'Sent email', '2026-06-11 09:00:00')"
+    ).run(idea.id, userId)
+    const items = rpt.getWeeklyIdeas(db, userId, '2026-06-09', '2026-06-15')
+    const action = items.find(i => i.title === 'Sent email')
+    expect(action).toBeDefined()
+    expect(action!.url).toBe(`/ideas/${idea.id}`)
+  })
+})

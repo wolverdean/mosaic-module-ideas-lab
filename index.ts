@@ -6,6 +6,7 @@ import { reportHooks }         from './src/hooks/reports.js'
 import { notificationHooks }   from './src/hooks/notifications.js'
 import { metrics, trace, SpanStatusCode } from '@opentelemetry/api'
 import { generateStatusSummary, saveStatusSummary } from './src/services/ai.service.js'
+import { getCalendarItems } from './src/services/report.service.js'
 
 const meter    = metrics.getMeter('ideas-lab')
 const jobRuns  = meter.createCounter('ideas_lab.jobs.runs_total')
@@ -126,6 +127,10 @@ export default defineModule({
 
   reports:       reportHooks,
   notifications: notificationHooks,
+
+  calendarItems(ctx, userId, year, month) {
+    return getCalendarItems(ctx.db.raw, userId, year, month)
+  },
 
   onInit(ctx: ModuleContext) {
     ctxRef.current = ctx
