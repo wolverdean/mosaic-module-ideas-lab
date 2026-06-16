@@ -86,8 +86,8 @@
 .il-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
 /* Chat */
-.il-chat { flex: 1; display: flex; flex-direction: column; }
-.il-chat-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.il-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.il-chat-messages { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .il-chat-msg { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
 .il-chat-msg.user { align-self: flex-end; background: #6366f1; color: #fff; border-bottom-right-radius: 2px; }
 .il-chat-msg.assistant { align-self: flex-start; background: rgba(128,128,128,.1); border-bottom-left-radius: 2px; }
