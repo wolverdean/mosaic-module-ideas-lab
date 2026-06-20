@@ -676,11 +676,16 @@
       shell = s
     },
 
-    onActivate(el) {
+    onActivate(el, context) {
       container = el
       renderAll()
       loadCategories()
-      loadIdeas()
+      loadIdeas().then(() => {
+        if (context?.itemId) {
+          const idea = state.ideas.find(i => i.id === Number(context.itemId))
+          if (idea) loadDetail(idea)
+        }
+      })
     },
 
     onDeactivate() {
