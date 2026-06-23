@@ -1,11 +1,8 @@
 import express                from 'express'
 import path                   from 'node:path'
-import { fileURLToPath }       from 'node:url'
 import type { ModuleContext }  from '@mosaic/sdk'
 import { createIdeasRouter }   from './ideas.js'
 import { createAiRouter }      from './ai.js'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export function createRouter(ctxRef: { current: ModuleContext | null }): express.Router {
   const router = express.Router()
