@@ -10,7 +10,7 @@ export function createRouter(ctxRef: { current: ModuleContext | null }): express
   // Serve the module's frontend entry point
   router.get('/ui.js', (_req, res) => {
     res.setHeader('Content-Type', 'application/javascript')
-    res.sendFile(path.resolve(__dirname, '../../public/ui.js'))
+    res.sendFile(path.resolve(__dirname, '../../../public/ui.js'))
   })
 
   router.use('/', createIdeasRouter(ctxRef))
