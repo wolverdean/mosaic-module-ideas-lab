@@ -8,3 +8,8 @@ uploads/
 coverage/
 .DS_Store
 *.swp
+
+# Feature Factory (managed externally — install via feature-factory repo)
+.claude/agents/
+.claude/hooks/
+.claude/skills/
